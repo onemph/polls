@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>アンケート - 投票</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css">
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      padding: 20px 16px;
+      gap: 20px;
+    }
+    #header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #header h1 { font-size: 0.9rem; color: var(--text-muted); }
+    #question-badge {
+      background: var(--primary);
+      color: #fff;
+      font-size: 0.7rem;
+      padding: 2px 10px;
+      border-radius: 99px;
+    }
+    #question-text {
+      font-size: 1.3rem;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+    #form-area { flex: 1; }
+    #vote-btn {
+      width: 100%;
+      padding: 16px;
+      font-size: 1rem;
+      margin-top: 20px;
+      border-radius: 12px;
+    }
+    #status-msg {
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--accent);
+      min-height: 1.2em;
+    }
+    /* 選択済み後の送信完了状態 */
+    #vote-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="header">
+    <h1>アンケート投票</h1>
+    <span id="question-badge">Q1</span>
+  </div>
+
+  <p id="question-text">読み込み中...</p>
+
+  <div id="form-area">
+    <ul id="choice-list" class="choice-list"></ul>
+    <p id="status-msg"></p>
+    <button id="vote-btn" class="btn btn-primary" disabled>投票する</button>
+  </div>
+
+  <script type="module">
+    import {
+      loadQuestions, watchCurrentIndex,
+      submitVote, getMyVotes
+    } from "./app.js";
+
+    let questions = [];
+    let currentIndex = 0;
+    let selectedChoices = new Set();
+
+    // 設問を表示する
+    async function showQuestion(index) {
+      const q = questions[index];
+      selectedChoices.clear();
+
+      document.getElementById("question-badge").textContent = `Q${index + 1}`;
+      document.getElementById("question-text").textContent = q.question;
+      document.getElementById("status-msg").textContent = "";
+
+      // 以前の自分の投票を復元
+      const myVotes = await getMyVotes(q.id);
+      myVotes.forEach(v => selectedChoices.add(v));
+
+      renderChoices(q);
+      updateVoteButton();
+    }
+
+    // 選択肢リストを描画する
+    function renderChoices(q) {
+      const list = document.getElementById("choice-list");
+      list.innerHTML = "";
+      q.options.forEach((label, i) => {
+        const li = document.createElement("li");
+        li.className = "choice-item" + (selectedChoices.has(i) ? " selected" : "");
+        li.dataset.index = i;
+
+        const input = document.createElement("input");
+        input.type = q.multiple ? "checkbox" : "radio";
+        input.name = "choice";
+        input.value = i;
+        input.checked = selectedChoices.has(i);
+
+        const span = document.createElement("span");
+        span.textContent = label;
+
+        li.appendChild(input);
+        li.appendChild(span);
+        list.appendChild(li);
+
+        li.addEventListener("click", () => handleSelect(i, q.multiple));
+      });
+    }
+
+    // 選択肢クリック時の処理
+    function handleSelect(index, multiple) {
+      const q = questions[currentIndex];
+      if (multiple) {
+        if (selectedChoices.has(index)) {
+          selectedChoices.delete(index);
+        } else {
+          selectedChoices.add(index);
+        }
+      } else {
+        selectedChoices.clear();
+        selectedChoices.add(index);
+      }
+      renderChoices(q);
+      updateVoteButton();
+    }
+
+    // 投票ボタンの状態を更新
+    function updateVoteButton() {
+      document.getElementById("vote-btn").disabled = selectedChoices.size === 0;
+    }
+
+    // 投票送信
+    document.getElementById("vote-btn").addEventListener("click", async () => {
+      const q = questions[currentIndex];
+      const btn = document.getElementById("vote-btn");
+      const msg = document.getElementById("status-msg");
+      btn.disabled = true;
+      msg.textContent = "送信中...";
+      try {
+        await submitVote(q.id, Array.from(selectedChoices));
+        msg.textContent = "✓ 投票しました。変更する場合は選択し直して再送信できます。";
+      } catch (e) {
+        msg.textContent = "エラーが発生しました。再度お試しください。";
+      } finally {
+        updateVoteButton();
+      }
+    });
+
+    // 初期化
+    async function init() {
+      questions = await loadQuestions();
+
+      // 司会者の設問変更をリアルタイムで監視して自動切り替え
+      watchCurrentIndex(async idx => {
+        currentIndex = idx;
+        await showQuestion(currentIndex);
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
