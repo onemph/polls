@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>アンケート - 司会者画面</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css">
+  <!-- QRコード生成ライブラリ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    body { display: flex; flex-direction: column; height: 100vh; padding: 16px; gap: 16px; }
+    #header { display: flex; justify-content: space-between; align-items: center; }
+    #header h1 { font-size: 1.1rem; color: var(--text-muted); }
+    #question-text { font-size: 1.5rem; font-weight: 700; flex: 1; }
+    #main { display: flex; gap: 16px; flex: 1; min-height: 0; }
+    #results-area { flex: 1; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+    #sidebar { width: 200px; display: flex; flex-direction: column; gap: 16px; }
+    #qr-box { background: #fff; padding: 8px; border-radius: var(--radius); text-align: center; }
+    #qr-box p { color: #333; font-size: 0.7rem; margin-top: 6px; }
+    #controls { display: flex; flex-direction: column; gap: 8px; }
+    #controls button { width: 100%; padding: 12px; font-size: 0.95rem; }
+    #footer { display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 0.8rem; }
+    #voter-count { color: var(--accent); font-weight: 600; }
+    .badge { background: var(--primary); color: #fff; font-size: 0.7rem; padding: 2px 8px; border-radius: 99px; }
+  </style>
+</head>
+<body>
+
+  <div id="header">
+    <h1>司会者画面</h1>
+    <span id="question-badge" class="badge">Q1 / 1</span>
+  </div>
+
+  <p id="question-text">読み込み中...</p>
+
+  <div id="main">
+    <div id="results-area"><!-- 横棒グラフがここに挿入される --></div>
+    <div id="sidebar">
+      <div id="qr-box">
+        <div id="qrcode"></div>
+        <p>参加者はここを読み取り</p>
+      </div>
+      <div id="controls">
+        <button id="btn-prev" class="btn btn-secondary">◀ 前の問題</button>
+        <button id="btn-next" class="btn btn-primary">次の問題 ▶</button>
+      </div>
+      <div id="footer">
+        <span>投票数: <span id="voter-count">0</span></span>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      loadQuestions, setCurrentIndex, getCurrentIndex,
+      watchResults, watchCurrentIndex
+    } from "./app.js";
+
+    let questions = [];
+    let currentIndex = 0;
+    let unsubscribeResults = null;
+
+    // QRコード生成 (client.html のURLを自動判別)
+    function generateQR() {
+      const clientUrl = location.href.replace("host.html", "client.html");
+      document.getElementById("qrcode").innerHTML = "";
+      new QRCode(document.getElementById("qrcode"), {
+        text: clientUrl, width: 168, height: 168,
+        colorDark: "#000", colorLight: "#fff",
+      });
+    }
+
+    // 横棒グラフを描画する
+    function renderChart(counts) {
+      const total = counts.reduce((a, b) => a + b, 0);
+      const q = questions[currentIndex];
+      const area = document.getElementById("results-area");
+      area.innerHTML = "";
+      q.options.forEach((label, i) => {
+        const pct = total === 0 ? 0 : Math.round(counts[i] / total * 100);
+        const row = document.createElement("div");
+        row.className = "bar-row";
+        row.innerHTML = `
+          <div class="bar-label">
+            <span>${label}</span>
+            <span>${counts[i]}票 (${pct}%)</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-fill" style="width:${pct}%"></div>
+          </div>`;
+        area.appendChild(row);
+      });
+      document.getElementById("voter-count").textContent = total;
+    }
+
+    // 設問を表示する
+    function showQuestion(index) {
+      const q = questions[index];
+      document.getElementById("question-text").textContent = q.question;
+      document.getElementById("question-badge").textContent =
+        `Q${index + 1} / ${questions.length}`;
+      document.getElementById("btn-prev").disabled = index === 0;
+      document.getElementById("btn-next").disabled = index === questions.length - 1;
+
+      // 以前の監視を解除して新しい設問を監視
+      if (unsubscribeResults) unsubscribeResults();
+      renderChart(Array(q.options.length).fill(0));
+      unsubscribeResults = watchResults(q.id, q.options.length, counts => {
+        renderChart(counts);
+      });
+    }
+
+    // 初期化
+    async function init() {
+      questions = await loadQuestions();
+      generateQR();
+      // Firebaseの現在インデックスを取得して表示
+      currentIndex = await getCurrentIndex();
+      showQuestion(currentIndex);
+
+      // 設問インデックスの変化をリアルタイム監視(他のタブとの同期)
+      watchCurrentIndex(idx => {
+        if (idx !== currentIndex) {
+          currentIndex = idx;
+          showQuestion(currentIndex);
+        }
+      });
+    }
+
+    // ボタン操作
+    document.getElementById("btn-next").addEventListener("click", async () => {
+      if (currentIndex < questions.length - 1) {
+        currentIndex++;
+        await setCurrentIndex(currentIndex);
+        showQuestion(currentIndex);
+      }
+    });
+    document.getElementById("btn-prev").addEventListener("click", async () => {
+      if (currentIndex > 0) {
+        currentIndex--;
+        await setCurrentIndex(currentIndex);
+        showQuestion(currentIndex);
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>
